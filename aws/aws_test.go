@@ -54,6 +54,10 @@ func sizeCheck(template interface{}, targetSize uint64) bool {
 	return targetSize == uint64(*disk.Size)
 }
 
+func TestAwsOps_IsVolumeReadyToExpand(t *testing.T) {
+
+	return
+}
 func TestAwsGetPrefixFromRootDeviceName(t *testing.T) {
 	a := &awsOps{}
 	tests := []struct {

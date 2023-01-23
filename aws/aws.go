@@ -942,6 +942,66 @@ func (s *awsOps) detachInternal(volumeID, instanceName string, options map[strin
 	return err
 }
 
+func (s *awsOps) waitForDesiredVolumeModificationState(volumeID string, desiredState string) (bool, error) {
+	request := &ec2.DescribeVolumesModificationsInput{
+		VolumeIds: []*string{&volumeID},
+	}
+	describeOutput, err := s.ec2.DescribeVolumesModifications(request)
+	if err != nil {
+		return false, fmt.Errorf("error while checking status for AWS EBS volume resize: %v", err)
+	}
+	volumeModifications := describeOutput.VolumesModifications
+	if len(volumeModifications) == 0 {
+		return false, fmt.Errorf("no volume modifications found for AWS EBS volume %v", volumeID)
+	}
+	volumeModification := volumeModifications[len(volumeModifications)-1]
+
+	//// The modification state is null for unmodified volumes.
+	//if volumeModification.ModificationState == nil && desiredState == ec2.VolumeModificationStateCompleted {
+	//	return true, nil
+	//}
+	if volumeModification.ModificationState != nil && *volumeModification.ModificationState == desiredState {
+		return true, nil
+	}
+
+	return false, nil
+}
+
+func (s *awsOps) getVolumeModificationState(volumeID string) (string, error) {
+	modificationStateRequest := &ec2.DescribeVolumesModificationsInput{
+		VolumeIds: []*string{&volumeID},
+	}
+	describeOutput, err := s.ec2.DescribeVolumesModifications(modificationStateRequest)
+	if err != nil {
+		return "", err
+	}
+	volumeModifications := describeOutput.VolumesModifications
+	if len(volumeModifications) == 0 {
+		return "", nil
+	}
+
+	volumeModification := volumeModifications[len(volumeModifications)-1]
+	state := *volumeModification.ModificationState
+	return state, nil
+}
+
+func (s *awsOps) IsVolumesReadyToExpand(volumeIDs []string) (bool, error) {
+	for i := 0; i < len(volumeIDs); i++ {
+		state, err := s.getVolumeModificationState(volumeIDs[i])
+		if err != nil {
+			return false, fmt.Errorf("unable to get modification state: #{err}. ")
+		}
+
+		if state != "" &&
+			(state == ec2.VolumeModificationStateModifying ||
+				state != ec2.VolumeModificationStateOptimizing) {
+			return false, nil
+		}
+	}
+
+	return true, nil
+}
+
 func (s *awsOps) Expand(
 	volumeID string,
 	newSizeInGiB uint64,
@@ -1006,7 +1066,6 @@ func (s *awsOps) Expand(
 	return newSizeInGiB, waitWithErr
 
 }
-
 func (s *awsOps) Snapshot(
 	volumeID string,
 	readonly bool,
